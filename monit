@@ -1,0 +1,135 @@
+#include <iostream>
+#include "monitor.h"
+
+#include <semaphore.h>
+#include <pthread.h>
+#include <time.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#define true 1
+#define num 5//number of consumers
+#define size 2//size of buffer
+
+using namespace std;
+
+struct fifo {
+    int index;//0..4
+    int buf[size];
+};
+typedef struct fifo fifo;
+
+void add_elem(fifo *fif, int elem) {
+
+    fif->buf[fif->index] = elem;
+    fif->index += 1;
+}
+
+void stan_kolejki(fifo *fif) {
+    int i = 0;
+    for (i = 0; i <= fif->index - 1; i++) {
+        printf("%d ", fif->buf[i]);
+    }
+    printf("\n");
+}
+
+int get_elem(struct fifo *fif) {
+    int ret = fif->buf[0];
+    int i;
+    fif->index -= 1;
+    for (i = 0; i < fif->index; i++) {
+        fif->buf[i] = fif->buf[i + 1];
+    }
+
+}
+
+pthread_t *prod;
+pthread_t *konsum;
+
+int count;
+
+class Buffer : private Monitor{
+private:
+    Condition full[num];
+    Condition empty[num];
+    Condition all_full;//
+
+    fifo buf[num];
+    int count[num];
+    int all_count;
+
+
+public:
+    Buffer():Monitor(){}
+    void produce(int i){
+        enter();//basic mutex
+
+        if(count[i]==size) wait(full[i]);
+
+        add_elem(&buf[i],rand()%100);
+        cout<<"producent dodał do kolejki:"<<i<<" ";
+        stan_kolejki(&buf[i]);
+        count[i] +=1;
+        if(count[i]==1) signal(empty[i]);
+        leave();
+    }
+    void consume(int i){
+        enter();
+
+        if(count[i]==0) wait(empty[i]);
+        get_elem(&buf[i]);
+        cout<<"konsument zabral z  kolejki:"<<i<<" ";
+        stan_kolejki(&buf[i]);
+        count[i] -=1;
+        if(count[i]==num-1) signal(full[i]);
+
+        leave();
+    }
+};
+Buffer buffer;
+
+void* producent(void *args){
+
+    while(true){
+        int i = rand()%5;
+        buffer.produce(i);
+        sleep(2);
+    }
+}
+
+void *konsument(void *args){
+    while(true){
+
+        int i = 0;
+        while (!pthread_equal(*(konsum + i), pthread_self()) && i < num) {
+            i++;
+        }
+        //int i = rand()%5;
+        buffer.consume(i);
+        sleep(1);
+
+    }
+
+
+}
+
+
+int main() {
+    srand(time(0));
+
+    prod = (pthread_t *) malloc(sizeof(pthread_t));
+    pthread_create(prod, NULL, &producent, NULL);
+    konsum = (pthread_t *) malloc(num * sizeof(pthread_t));
+    int i;
+    for (i = 0; i < num; i++) {
+        pthread_create(konsum + i, NULL, &konsument, NULL);
+    }
+
+    pthread_join(*konsum, NULL);
+    for (i = 0; i < num; i++) {
+        pthread_join(*(konsum + i), NULL);
+    }
+
+    std::cout << "Hello, World!" << std::endl;
+    return 0;
+}
